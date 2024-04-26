@@ -1,0 +1,167 @@
+const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
+const fs = require("fs");
+const pdf = require("html-pdf");
+
+// Initialize WooCommerce API
+const WooCommerce = new WooCommerceRestApi({
+  url: 'https://staging2.vaseegrahveda.com/',
+  consumerKey: 'ck_1cfb0c2ac1ce87466afd68488ad8b790239ebc2c',
+  consumerSecret: 'cs_63b22c257d43ef3ee8d6d6747ab80ede38013f61',
+  version: 'wc/v3'
+});
+
+// Function to fetch orders recursively
+async function fetchOrders(offset = 0, allOrders = []) {
+  try {
+    // Fetch orders with 'processing' status and pagination
+    const response = await WooCommerce.get("orders", {
+      status: "processing",
+      offset: offset
+    });
+
+    // Concatenate the fetched orders with the existing orders
+    allOrders.push(...response.data);
+
+    // If there are more orders to fetch, recursively call the function
+    const totalPages = response.headers["x-wp-totalpages"];
+    if (totalPages > offset / 10 + 1) { // assuming 10 orders per page
+      return fetchOrders(offset + 10, allOrders); // assuming 10 orders per page
+    }
+
+    // Return all fetched orders
+    return allOrders;
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    return []; // Return an empty array in case of an error
+  }
+}
+
+// Function to generate PDF from order details
+function generatePDF(htmlContent) {
+  pdf.create(htmlContent, { format: 'Letter' }).toFile('order_details.pdf', function(err, res) {
+    if (err) return console.log(err);
+    console.log("PDF generated successfully.");
+  });
+}
+
+// Call the function to fetch orders
+fetchOrders()
+  .then(orders => {
+    // Generate HTML content from fetched orders
+    const htmlContent = generateHTML(orders);
+    // Generate PDF from HTML content
+    generatePDF(htmlContent);
+  })
+  .catch(error => {
+    console.error("Error:", error);
+  });
+
+// Function to generate HTML content from orders
+function generateHTML(orders) {
+  let htmlContent = `
+<html>
+<head>
+  <title>Order Details</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      width: 4in;
+      height: 4in;
+    }
+
+    .content {
+      width: 100%;
+      height: 100%;
+      background-color: white;
+      border: 3px solid black;
+      padding: 5px;
+      font-size: 10px; /* Adjust font size as needed */
+    }
+
+    .content p {
+      font-size: 10px;
+    }
+
+    .content table {
+      width: 100%;
+      font-size: 10px;
+      border-collapse: collapse;
+    }
+
+    .content table th,
+    .content table td {
+      border: 1px solid #ddd;
+      padding: 5px;
+      text-align: left;
+    }
+
+    .content table th {
+      background-color: #f2f2f2;
+    }
+
+    h3, h2 {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>`;
+
+  orders.forEach(order => {
+    htmlContent += `
+    <div class="content">
+      <h3>Ship Via: ST COURIER</h3>
+      <h2 style="text-align: center;">Vaseegrah Veda Order ID ${order.id}</h2>
+      <table>
+        <tr>
+          <td style="font-size: 10px; padding: 5px; text-align: center;">To</td>
+          <td>
+            ${order.billing.first_name} ${order.billing.last_name},<br>
+            ${order.billing.phone}<br>
+            ${order.shipping.address_1},<br> 
+            ${order.shipping.city},<br>
+            ${order.shipping.state}, ${order.shipping.postcode}.<br>
+            ${order.shipping.country}<br>
+            ${order.billing.phone}
+          </td>
+        </tr>
+      </table>
+
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <b>Seller:</b><br>
+              <b>VASEEGRAH VEDA</b><br>
+              No:7 VIJAYA NAGAR,<br>
+              SRINIVASAPURAM (Post)<br>
+              THANJAVUR<br>
+              TAMIL NADU- 613009<br>
+              MOBILE: 8248817165
+            </td>
+            <td>
+              <b>Prepaid Order:</b><br>
+              Date: ${order.date_created}<br>
+              Weight: ${order.total_weight}<br>
+              No.of Items: ${order.line_items.length}<br>
+              Packed By: None
+            </td>
+          </tr>
+          <tr>
+            <td colspan='2'>
+              <strong>Products:</strong><br>
+              ${order.line_items.map((item) => `${item.name} X ${item.quantity},`).join("")}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+  });
+
+  htmlContent += `
+</body>
+</html>`;
+
+  return htmlContent;
+}
